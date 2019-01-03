@@ -135,13 +135,19 @@ handle_cast({downlink_error, _MAC, DevAddr, Error}, State) ->
 
 handle_info({process, PHYPayload}, #state{recent=Recent}=State) ->
     % find the best (for now)
-    [{Req, MAC, RxQ}|_Rest] = lists:sort(
-        fun({_R1, _M1, Q1}, {_R2, _M2, Q2}) ->
-            Q1#rxq.rssi >= Q2#rxq.rssi
+%%    [{Req, MAC, RxQ}|_Rest] = lists:sort(
+%%        fun({_R1, _M1, Q1}, {_R2, _M2, Q2}) ->
+%%            Q1#rxq.rssi >= Q2#rxq.rssi
+%%        end,
+%%        dict:fetch(PHYPayload, Recent)),
+    lists:map(
+        fun({Req, MAC, RxQ}) ->
+            wpool:cast(handler_pool, {Req, MAC, RxQ, PHYPayload}, available_worker)
         end,
-        dict:fetch(PHYPayload, Recent)),
+        dict:fetch(PHYPayload, Recent)
+    ),
     % lager:debug("--> datr ~s, codr ~s, tmst ~B, size ~B", [RxQ#rxq.datr, RxQ#rxq.codr, RxQ#rxq.tmst, byte_size(PHYPayload)]),
-    wpool:cast(handler_pool, {Req, MAC, RxQ, PHYPayload}, available_worker),
+%%    wpool:cast(handler_pool, {Req, MAC, RxQ, PHYPayload}, available_worker),
     Recent2 = dict:erase(PHYPayload, Recent),
     {noreply, State#state{recent=Recent2}}.
 

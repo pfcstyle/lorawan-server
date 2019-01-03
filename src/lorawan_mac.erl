@@ -448,9 +448,17 @@ handle_uplink(Gateway, RxQ, Confirm, Link, #frame{devaddr=DevAddr, adr=ADR,
                     devstat_fcnt=undefined, last_qs=[]}
         end,
     % process commands
-    RxFrame = build_rxframe(Gateway, ULink, RxQ, Confirm, Frame),
-    {ok, MacConfirm, L2, FOptsOut, RxFrame2} = lorawan_mac_commands:handle(RxQ, ULink, FOpts, RxFrame),
-    ok = mnesia:dirty_write(links, L2#link{last_rx=calendar:universal_time(), last_mac=Gateway#gateway.mac, last_rxq=RxQ}),
+    RxQ2 =
+        case RxQ#rxq.time of
+            undefined ->
+                RxQ;
+            _ ->
+                {{Year, Month, Day}, {Hour, Minite, Second}} = RxQ#rxq.time,
+                RxQ#rxq{tmst = round(Second * 1000000000)}
+        end,
+    RxFrame = build_rxframe(Gateway, ULink, RxQ2, Confirm, Frame),
+    {ok, MacConfirm, L2, FOptsOut, RxFrame2} = lorawan_mac_commands:handle(RxQ2, ULink, FOpts, RxFrame),
+    ok = mnesia:dirty_write(links, L2#link{last_rx=calendar:universal_time(), last_mac=Gateway#gateway.mac, last_rxq=RxQ2}),
     ok = mnesia:sync_dirty(
         fun() -> mnesia:dirty_write(rxframes, RxFrame2) end),
     % check whether last downlink transmission was lost
@@ -476,15 +484,15 @@ handle_uplink(Gateway, RxQ, Confirm, Link, #frame{devaddr=DevAddr, adr=ADR,
     end,
     % invoke applications
     case lorawan_handler:handle_rx(Gateway, Link,
-            #rxdata{fcnt=FCnt, port=FPort, data=RxData, last_lost=LastLost, shall_reply=ShallReply}, RxQ) of
+            #rxdata{fcnt=FCnt, port=FPort, data=RxData, last_lost=LastLost, shall_reply=ShallReply}, RxQ2) of
         retransmit ->
             lager:debug("~s retransmitting", [binary_to_hex(Link#link.devaddr)]),
-            {send, Link#link.devaddr, choose_tx(Link, RxQ), LostFrame};
+            {send, Link#link.devaddr, choose_tx(Link, RxQ2), LostFrame};
         {send, TxData} ->
-            send_unicast(Link, choose_tx(Link, RxQ), Confirm, FOptsOut, TxData);
+            send_unicast(Link, choose_tx(Link, RxQ2), Confirm, FOptsOut, TxData);
         ok when ShallReply ->
             % application has nothing to send, but we still need to repond
-            send_unicast(Link, choose_tx(Link, RxQ), Confirm, FOptsOut, #txdata{});
+            send_unicast(Link, choose_tx(Link, RxQ2), Confirm, FOptsOut, #txdata{});
         ok ->
             ok;
         {error, Error} ->
